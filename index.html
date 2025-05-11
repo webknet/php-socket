@@ -1,1 +1,213 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+</head>
+<body>
+    <nav class="navbar fixed-top navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand">My to-do list</a>
+            <div class="input-group mb-3">
+                <input id="txt-input" type="text" class="form-control" placeholder="To do" aria-label="Recipient's username" aria-describedby="button-addon2">
+                <button class="btn btn-primary" type="button" id="button-addon">add</button>
+            </div>
+                
+        </div>
+   
+    </nav>
+    <div style="height: 140px;"></div>
+    <div class="container">        
+        <div id="todoList"  class="list-group"></div>
+    </div>
+    <div class="mt-5"></div>
+    <!-- <script src="app.js"></script> -->
+     <style>
+        .bgInsert {
+            background-color:#8afa86;
+        }
+        .bgUpdate {
+            background-color: #f0fa69;
+        }
+        .bgDelete {
+            background-color: #ff7171;
+        }
+     </style>
+    <script>
+        const elTodoList = document.querySelector('#todoList')
+        const elBtn = document.querySelector('#button-addon')
+        const elTxt = document.querySelector('#txt-input')
+        const scroll_behavior ={ behavior: 'smooth', block: "end", inline: "nearest"}
 
+        let html = itemTodo => `
+            <div class="_item list-group-item d-flex align-items-center list-group-item-action" itemid="${itemTodo.id}">
+            <img src="${ itemTodo.completed != 0 ? 'check.svg' : 'minus.svg' }" class="me-2" alt="check" height="25">
+            <span class="flex-grow-1">${itemTodo.text}</span>  
+            <img class="_cancel" src="cancel.svg" alt="check" height="25">                          
+            </div>
+        `
+
+        const clientId = Math.random().toString(36).substr(2, 9);
+        const wsURL = 'wss://php.webknet.app/ws'
+        
+        let ws = new WebSocket(wsURL)        
+
+        ws.onopen = WsOpen
+        ws.onmessage = WsMessage
+        ws.onclose = WsClose
+        ws.onerror = WsError
+        
+        // *** WebSocket functions ***
+        function WsOpen(event) {
+           ws.send(JSON.stringify({ action: 'register', clientId }))
+
+            // Configura pings a cada 10 segundos
+            const pingInterval = setInterval(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send('ping');
+                        }
+                    }, 10000);
+            
+        }
+
+        function WsMessage(event) {
+            const result = JSON.parse(event.data)
+            const data = result.data
+            //console.log('OnMessage:',result, data)
+            
+            switch (result.action) {
+                    case 'insert':
+                        WsInsert(data)
+                        
+                        break;
+                    case 'update':
+                        WsUpdate(data)
+                        
+                        break;
+                    case 'delete':
+                        WsUpdate(data, true)
+                        
+                        break;
+            }
+        };
+
+        function WsClose(event) {
+            checkWS()
+            //clearInterval(pingInterval)
+            console.log('WebSocket desconectado', event)
+        }
+
+        function WsError (event) { console.log(event)}
+
+        const checkWS = ()=> {
+            if (ws && ws.readyState === WebSocket.CLOSED) {                
+                ws = new WebSocket(wsURL)
+            }
+        }
+
+        // *** End WebSocket functions ***
+        
+        let data = [] //tasks
+
+        elBtn.addEventListener('click', async e  => {
+            await checkWS()
+            let res = await TodoAPI({ action: 'insert', clientId, text: elTxt.value })
+            
+            if (res.status == 'Ok') {
+                let newItem = { id:res.data.id, text: elTxt.value, completed: 0 }
+                data.push(newItem)
+                elTodoList.insertAdjacentHTML('beforeend', html(newItem))
+                
+                let el = document.querySelector(`._item[itemid="${newItem.id }"]`)
+                el.scrollIntoView(scroll_behavior)
+            }             
+            
+            elTxt.value = ''
+        })
+
+        elTodoList.addEventListener('click', async e => {            
+            let elParent = e.target.parentElement
+            let res = null
+
+            if (elParent.classList.contains('_item')){
+                
+                let item = data.find(item => item.id == elParent.attributes.itemid.value)
+                    
+                if (e.target.classList.contains('_cancel')){    
+                    data.splice(data.indexOf(item), 1)
+                    elParent.remove()
+                    res = await TodoAPI({ action: 'delete', clientId, id: item.id })
+
+                } else {
+                    item.completed = item.completed == 0 ? 1: 0
+                    elParent.querySelector('img').attributes.src.value = item.completed == 1 ? 'check.svg': 'minus.svg'
+                    res = await TodoAPI({ action: 'update',clientId, completed: item.completed, id: item.id })
+                }
+                //e.target.scrollIntoView({ behavior: 'smooth' })
+            } 
+                           
+        })
+
+        function WsInsert(_data) {
+            let newItem = _data
+            data.push(newItem)
+            elTodoList.insertAdjacentHTML('beforeend', html(newItem))
+            let el = document.querySelector(`._item[itemid="${ _data.id }"]`)
+            el.classList.add('bgInsert')
+            setTimeout(() => {
+                el.classList.remove('bgInsert')
+            }, 2000);
+
+            el.scrollIntoView(scroll_behavior)
+        }
+       
+        function WsUpdate(_data, del = false) {  
+            let el = document.querySelector(`._item[itemid="${ _data.id }"]`)
+            el.scrollIntoView(scroll_behavior)
+
+            if (!del) {
+                let item = data.find(item => item.id = _data.id)
+                item.completed = _data.completed
+                el.querySelector('img').attributes.src.value = item.completed == 1 ? 'check.svg': 'minus.svg'
+                el.classList.add('bgUpdate')  
+                        
+                setTimeout(() => {
+                    el.classList.remove('bgUpdate')
+                    //document.querySelector(`._item[itemid="${id}"]`).classList.remove('bgUpdate')                
+                }, 2000)  
+            } else {
+                el.classList.add('bgDelete')
+                setTimeout(() => {
+                    el.remove()
+                }, 2000)
+
+            }     
+                     
+        }
+
+        async function TodoAPI(query) {
+            const result = await fetch('/api.php', {
+                method: 'POST',
+                headers: {
+                    'content-Type': 'application/json'
+                },
+                body: JSON.stringify(query) //{ action: 'query', query: 'SELECT * FROM Todo'})
+            })
+            return await result.json()
+        }
+
+        async function Init() {
+            const res = await TodoAPI({ action: 'get' })
+            if (res.status == 'Ok') {
+                data = res.data
+                data.forEach( item => {
+                    elTodoList.insertAdjacentHTML('beforeend', html(item))
+                })
+            }
+        }
+
+        Init()
+    </script>
+</body>
+</html>
